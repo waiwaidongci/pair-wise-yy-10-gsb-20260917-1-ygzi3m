@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>小型漆线雕工坊管理</title>
+  <title>漆线雕工坊 · 离线排产管理</title>
   <style>
     :root {
       --bg: #eef3f0;
@@ -30,6 +30,7 @@
     button.warn { background: var(--amber); }
     button.danger { background: var(--red); }
     button.violet { background: var(--violet); }
+    button[disabled] { opacity: .45; cursor: not-allowed; }
     label { display: grid; gap: 5px; font-size: 12px; color: var(--muted); }
     .top { display: grid; grid-template-columns: 360px 1fr; gap: 18px; align-items: start; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
@@ -51,19 +52,66 @@
     dialog::backdrop { background: rgba(0, 0, 0, 0.3); }
     .dialog-body { padding: 16px; display: grid; gap: 10px; }
     .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+    .red { color: var(--red); }
+
+    /* —— 七天排程 —— */
+    .sched-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .sched-head h2 { margin: 0; }
+    .rush { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 10px; align-items: end; margin: 12px 0; padding: 12px; background: #f6f4fb; border: 1px dashed var(--violet); border-radius: 8px; }
+    .rush .rush-title { grid-column: 1 / -1; font-size: 13px; color: var(--violet); font-weight: 600; }
+    .rush button { min-height: 40px; }
+    .msg { padding: 9px 12px; border-radius: 7px; font-size: 13px; margin: 10px 0; line-height: 1.5; }
+    .msg.ok { background: #ecf4f0; border: 1px solid #bfd6cd; }
+    .msg.err { background: #fbf0f0; border: 1px solid #e3c3c4; }
+    .msg.info { background: #f2f5f3; border: 1px solid var(--line); }
+    .alert { border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 13px; line-height: 1.6; display: grid; gap: 5px; border: 1px solid; }
+    .alert-red { background: #fbf0f0; border-color: #e3c3c4; }
+    .alert-warn { background: #fdf8ec; border-color: #e7d6ad; }
+    .alert .actions { margin-top: 2px; }
+    .alert .actions button { flex: 0 1 auto; min-width: 96px; }
+    .sched-stats { font-size: 13px; color: var(--muted); margin: 10px 0; }
+    .sched-stats b { color: var(--ink); }
+    .sched-grid-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #f3f7f4; padding: 8px; }
+    .sched-grid { display: grid; grid-template-columns: repeat(7, minmax(168px, 1fr)); gap: 8px; min-width: 1200px; }
+    .day { border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #f9fbf9; display: grid; grid-template-rows: auto 1fr; align-content: start; }
+    .day h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 13px; margin: 0 0 8px; }
+    .today-tag { background: var(--teal); color: #fff; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
+    .cap { font-size: 11px; color: var(--muted); margin-left: auto; }
+    .cap.full { color: var(--amber); font-weight: 600; }
+    .cap.over { color: var(--red); font-weight: 700; }
+    .lane h5 { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+    .slot { border: 1px dashed var(--line); border-radius: 7px; padding: 6px; margin-bottom: 8px; background: #fcfefd; min-height: 74px; }
+    .lane-gold .slot { background: #fffdf6; }
+    .slot.used { border-style: solid; border-color: #d7e0dc; background: #fff; }
+    .slot.over { border-color: var(--red); background: #fcefef; }
+    .slot .empty { font-size: 12px; padding: 0; }
+    .sched-card { border: 1px solid #d7e0dc; border-left: 4px solid var(--teal); background: #fff; border-radius: 7px; padding: 8px; font-size: 12px; cursor: pointer; }
+    .sched-card.rush { border-left-color: var(--violet); }
+    .sched-card.late { border-left-color: var(--red); }
+    .sched-card .meta { font-size: 12px; }
+    .sched-card .actions { margin-top: 6px; }
+    .sched-card .actions button { min-width: auto; flex: 1; padding: 5px 6px; font-size: 11px; }
+    .tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0; }
+    .tag { font-size: 11px; border-radius: 4px; padding: 1px 6px; background: #eef3f0; color: var(--muted); white-space: nowrap; }
+    .tag-red { background: #f7e7e7; color: var(--red); }
+    .tag-amber { background: #f7efdd; color: var(--amber); }
+    .tag-violet { background: #eae7f5; color: var(--violet); }
+    .tag-blue { background: #e4eff0; color: var(--teal); }
+    .sched-foot { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
     @media (max-width: 980px) {
       header { display: block; padding: 18px; }
       main { padding: 16px; }
       .top, .lists, .toolbar { grid-template-columns: 1fr; }
       .grid2 { grid-template-columns: 1fr; }
+      .rush { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
 <body>
   <header>
     <div>
-      <h1>小型漆线雕工坊管理</h1>
-      <div class="sub">贴线、阴干、上金粉、待交付的作品流转与缺陷追踪</div>
+      <h1>漆线雕工坊 · 离线排产管理</h1>
+      <div class="sub">贴线进度 → 两天阴干（每天≤2件）→ 一天上金粉（每天≤1件），按交付承诺排出未来七天</div>
     </div>
     <button id="exportBtn" class="secondary">导出 JSON</button>
   </header>
@@ -118,6 +166,35 @@
         <div id="board" class="board"></div>
       </section>
     </section>
+
+    <section class="panel" id="schedPanel">
+      <div class="sched-head">
+        <h2>未来七天排程</h2>
+        <div class="meta">规则：贴线按每日约 25% 估算完工；阴干连续 2 天、每天最多 2 件；上金粉 1 天、每天最多 1 件。超期件与缺陷件优先；已生成的排程即承诺，插单只能使用空余工位，不得挤占。</div>
+      </div>
+
+      <form id="rushForm" class="rush">
+        <div class="rush-title">急件插单（不挤占任何已承诺订单；排不进时显示原承诺与冲突原因，不会静默改期）</div>
+        <label>胎体材质<input name="base" required placeholder="木胎挂屏"></label>
+        <label>纹样主题<input name="theme" required placeholder="唐草纹"></label>
+        <label>线条粗细<select name="line"><option>细线</option><option selected>中线</option><option>粗线</option><option>混合线</option></select></label>
+        <label>贴线进度<input name="progress" type="number" min="0" max="100" value="100"></label>
+        <label>承诺交付<input name="delivery" type="date" required></label>
+        <label>缺陷(可选)<input name="defect" placeholder="无"></label>
+        <button type="submit" class="violet">尝试插单</button>
+      </form>
+
+      <div id="schedMsg"></div>
+      <div id="schedAlerts"></div>
+      <div class="sched-stats" id="schedStats"></div>
+      <div class="sched-grid-wrap">
+        <div class="sched-grid" id="schedGrid"></div>
+      </div>
+      <div class="sched-foot">
+        <button id="reautoBtn" class="warn">重新自动排程</button>
+        <span class="meta">手工前移/后移、插单结果都保存在本机浏览器，刷新后保留。只有点击这个按钮才会整体重排（需确认），系统从不自动改动已承诺日期。</span>
+      </div>
+    </section>
   </main>
 
   <dialog id="detailDialog">
@@ -136,8 +213,45 @@
 
   <script>
     const statuses = ["贴线中", "待阴干", "上金粉", "待交付"];
+    const statusRank = new Map(statuses.map((s, i) => [s, i]));
     const storageKey = "zfl42Works";
-    const today = new Date().toISOString().slice(0, 10);
+
+    // —— 排程常量 ——
+    const HORIZON = 7;        // 未来七天
+    const DRY_DAYS = 2;       // 阴干两天
+    const DRY_CAP = 2;        // 每天最多两件阴干
+    const GOLD_CAP = 1;       // 每天最多一件上金粉
+    const THREAD_RATE = 25;   // 贴线进度按每日 25% 估算
+    const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    const DAY_MS = 86400000;
+    const SOURCE_LABEL = { auto: "自动排程", manual: "手工调整", rush: "插单" };
+
+    function parseDate(s) {
+      const [y, m, d] = String(s || "").split("-").map(Number);
+      return new Date(y || 1970, (m || 1) - 1, d || 1);
+    }
+    function fmtDate(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+    function addDays(s, n) {
+      const d = parseDate(s);
+      d.setDate(d.getDate() + n);
+      return fmtDate(d);
+    }
+    function dayDiff(a, b) { // b - a（天）
+      return Math.round((parseDate(b) - parseDate(a)) / DAY_MS);
+    }
+    function md(s) {
+      if (!s) return "—";
+      const d = parseDate(s);
+      return `${d.getMonth() + 1}月${d.getDate()}日`;
+    }
+    function dayLabel(idx) {
+      const d = parseDate(addDays(today, idx));
+      return { text: `${d.getMonth() + 1}/${d.getDate()}`, week: WEEK[d.getDay()] };
+    }
+
+    const today = fmtDate(new Date());
     const seed = [
       { id: crypto.randomUUID(), base: "木胎香盒", theme: "海水江崖", line: "细线", progress: 70, dryDate: today, gold: "未处理", defect: "", delivery: "2026-06-26", status: "待阴干", note: "边线需保持低浮雕感", logs: ["创建作品"] },
       { id: crypto.randomUUID(), base: "脱胎盘", theme: "折枝梅", line: "混合线", progress: 95, dryDate: "2026-06-20", gold: "试扫粉", defect: "左侧枝干翘线", delivery: "2026-06-23", status: "上金粉", note: "客户要求金粉偏暗", logs: ["创建作品", "记录翘线"] },
@@ -145,8 +259,10 @@
     ];
     let works = JSON.parse(localStorage.getItem(storageKey) || "null") || seed;
     let activeId = null;
+    let schedNote = null; // {type:'ok'|'err'|'info', text}
 
     const form = document.querySelector("#workForm");
+    const rushForm = document.querySelector("#rushForm");
     const board = document.querySelector("#board");
     const statusFilter = document.querySelector("#statusFilter");
     const themeFilter = document.querySelector("#themeFilter");
@@ -154,11 +270,21 @@
     const dialog = document.querySelector("#detailDialog");
 
     form.dryDate.value = today;
-    form.delivery.value = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+    form.delivery.value = addDays(today, 5);
+    rushForm.delivery.value = addDays(today, 3);
     statusFilter.innerHTML = `<option value="">全部状态</option>` + statuses.map(s => `<option>${s}</option>`).join("");
 
+    function stripView(w) {
+      const c = { ...w };
+      delete c._sv;
+      return c;
+    }
     function save() {
-      localStorage.setItem(storageKey, JSON.stringify(works));
+      localStorage.setItem(storageKey, JSON.stringify(works.map(stripView)));
+    }
+    function note(type, text) {
+      schedNote = { type, text };
+      render();
     }
 
     function filtered() {
@@ -168,12 +294,460 @@
         .sort((a, b) => (a[sortMode.value] || "").localeCompare(b[sortMode.value] || ""));
     }
 
+    // ============ 排程引擎 ============
+    // 计划持久化在作品上：
+    //   w.plan = { dryStart:'YYYY-MM-DD', source:'auto'|'manual'|'rush' }
+    //   w.planState = 'scheduled' | 'conflict'(插单被拒) | 'unscheduled'(七天排不下) | 'done'
+    //   w.planIssue = 冲突/无法排入时给负责人看的原因（含原承诺交付日）
+    //   w.rush = true 表示急件插单
+    // _sv 为每次构建的临时视图，不入库。
+
+    function emptyGrid() {
+      return {
+        dry: Array.from({ length: HORIZON }, () => []),
+        gold: Array.from({ length: HORIZON }, () => [])
+      };
+    }
+    function isActive(w) {
+      return w.status !== "待交付" && w.planState !== "done";
+    }
+    function threadDays(w) {
+      return w.progress >= 100 ? 0 : Math.max(1, Math.ceil((100 - w.progress) / THREAD_RATE));
+    }
+    // 最早可进入阴干的天序号（相对 today）
+    function earliestDry(w) {
+      if (w.status === "上金粉" || w.status === "待交付") return null;
+      let e = w.status === "贴线中" ? threadDays(w) : 0;
+      const d = dayDiff(today, w.dryDate);
+      if (Number.isFinite(d) && d > e) e = d; // 已登记的阴干日期在将来，则尊重它
+      return Math.max(0, e);
+    }
+    function canPlace(grid, s) {
+      return s >= 0 && s <= HORIZON - DRY_DAYS - 1
+        && grid.dry[s].length < DRY_CAP
+        && grid.dry[s + 1].length < DRY_CAP
+        && grid.gold[s + DRY_DAYS].length < GOLD_CAP;
+    }
+    function place(grid, w, s) {
+      grid.dry[s].push(w.id);
+      grid.dry[s + 1].push(w.id);
+      grid.gold[s + DRY_DAYS].push(w.id);
+    }
+    function namesOf(ids) {
+      const names = ids.map(id => {
+        const w = works.find(x => x.id === id);
+        return w ? `《${w.theme}》` : "";
+      }).filter(Boolean);
+      return names.length ? names.join("、") : "其他在制件";
+    }
+    // 超期件 → 缺陷件 → 交付承诺最早 → 贴线进度高
+    function priorityCmp(a, b) {
+      const pa = a.delivery < today ? 0 : 1;
+      const pb = b.delivery < today ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      if (!!a.defect !== !!b.defect) return a.defect ? -1 : 1;
+      const c = a.delivery.localeCompare(b.delivery);
+      if (c) return c;
+      return b.progress - a.progress;
+    }
+
+    // 已承诺占用：今日在制（上金粉状态）锁死金粉位 + 已持久化的计划
+    function committedGrid(list) {
+      const grid = emptyGrid();
+      for (const w of list) {
+        if (!isActive(w)) continue;
+        if (w.status === "上金粉") {
+          grid.gold[0].push(w.id); // 今日在制，不可移动
+          continue;
+        }
+        if (w.plan && w.plan.dryStart) {
+          const s = dayDiff(today, w.plan.dryStart);
+          if (s >= 0 && s <= HORIZON - DRY_DAYS - 1 && canPlace(grid, s)) {
+            place(grid, w, s);
+          }
+        }
+      }
+      return grid;
+    }
+
+    function noSlotReason(grid, w, e) {
+      let r;
+      if (e > HORIZON - DRY_DAYS - 1) {
+        r = `按贴线进度 ${w.progress}% 估算，最早 ${md(addDays(today, e))} 才能开始阴干，超出未来七天窗口（原承诺交付 ${w.delivery}）。`;
+      } else {
+        r = `未来七天阴干/金粉工位容量不足，无法排入（原承诺交付 ${w.delivery}）。`;
+        const gf = [];
+        for (let d = e + DRY_DAYS; d <= HORIZON - 1; d++) {
+          if (grid.gold[d].length >= GOLD_CAP) gf.push(`${md(addDays(today, d))}(${namesOf(grid.gold[d])})`);
+        }
+        if (gf.length) r += ` 金粉工位已满：${gf.join("、")}。`;
+        const df = [];
+        for (let d = e; d <= HORIZON - 2; d++) {
+          if (grid.dry[d].length >= DRY_CAP) df.push(`${md(addDays(today, d))}(${namesOf(grid.dry[d])})`);
+        }
+        if (df.length) r += ` 阴干工位已满：${df.join("、")}。`;
+      }
+      return r;
+    }
+
+    // 构建排程：锁定在制件 → 载入已承诺计划 → 其余按优先级自动排入并持久化
+    function buildSchedule() {
+      works.forEach(w => { delete w._sv; });
+      let changed = false;
+      const grid = emptyGrid();
+      const active = works.filter(isActive);
+
+      // 1) 今日在制：状态为「上金粉」的作品锁死今天的金粉位
+      for (const w of active.filter(w => w.status === "上金粉")) {
+        grid.gold[0].push(w.id);
+        w._sv = { kind: "fixed", s: 0 };
+      }
+
+      // 2) 已持久化的承诺计划（手工调整 / 插单 / 往日自动排程）
+      for (const w of active) {
+        if (w._sv) continue;
+        if (!w.plan || !w.plan.dryStart) continue;
+        const s = dayDiff(today, w.plan.dryStart);
+        if (!Number.isFinite(s)) continue;
+        if (s < 0) { w._sv = { kind: "stale", s }; continue; }
+        if (s > HORIZON - DRY_DAYS - 1) { w._sv = { kind: "outside", s }; continue; }
+        if (canPlace(grid, s)) {
+          place(grid, w, s);
+          w._sv = { kind: "planned", s, source: w.plan.source || "manual" };
+        } else {
+          w._sv = { kind: "collision", s };
+        }
+      }
+
+      // 3) 未排计划的普通作品：超期、缺陷优先，自动找最早空档，落库即承诺
+      //    插单冲突件（planState='conflict'）保持待处理，不参与自动挤占
+      const pending = active
+        .filter(w => !w._sv && w.planState !== "conflict")
+        .sort(priorityCmp);
+      for (const w of pending) {
+        const e = earliestDry(w);
+        if (e === null) continue;
+        let slot = -1;
+        for (let s = e; s <= HORIZON - DRY_DAYS - 1; s++) {
+          if (canPlace(grid, s)) { slot = s; break; }
+        }
+        if (slot >= 0) {
+          place(grid, w, slot);
+          w._sv = { kind: "planned", s: slot, source: "auto" };
+          const plan = { dryStart: addDays(today, slot), source: "auto" };
+          if (JSON.stringify(w.plan) !== JSON.stringify(plan)) { w.plan = plan; changed = true; }
+          if (w.planState !== "scheduled") { w.planState = "scheduled"; changed = true; }
+          if (w.planIssue) { w.planIssue = null; changed = true; }
+        } else {
+          const reason = noSlotReason(grid, w, e);
+          w._sv = { kind: "unscheduled", s: null, earliest: e };
+          if (w.planState !== "unscheduled") { w.planState = "unscheduled"; changed = true; }
+          if (w.planIssue !== reason) { w.planIssue = reason; changed = true; }
+        }
+      }
+
+      // 4) 被拒插单保留在冲突池
+      for (const w of active.filter(w => w.planState === "conflict" && !w._sv)) {
+        w._sv = { kind: "conflict", earliest: earliestDry(w) };
+      }
+      if (changed) save();
+      return grid;
+    }
+
+    // 急件插单：只在空余工位中寻找；任何已承诺订单都不动
+    function attemptRush(w) {
+      const grid = committedGrid(works.filter(x => x.id !== w.id));
+      const e = earliestDry(w);
+      const deadline = dayDiff(today, w.delivery); // 上金粉必须不晚于此天
+      if (e === null) {
+        w.plan = null; w.planState = "conflict";
+        w.planIssue = `作品当前状态为「${w.status}」，无需进入阴干/金粉排程。`;
+        return { ok: false };
+      }
+      if (e + DRY_DAYS > deadline) {
+        w.plan = null; w.planState = "conflict";
+        w.planIssue = `工艺要求 2 天阴干 + 1 天上金粉。按贴线进度 ${w.progress}% 估算，最早 ${md(addDays(today, e))} 开始阴干、${md(addDays(today, e + DRY_DAYS))} 才能上金粉，已晚于原承诺交付日 ${w.delivery}。`;
+        return { ok: false };
+      }
+      const maxStart = Math.min(HORIZON - DRY_DAYS - 1, deadline - DRY_DAYS);
+      let slot = -1;
+      for (let s = e; s <= maxStart; s++) {
+        if (canPlace(grid, s)) { slot = s; break; }
+      }
+      if (slot >= 0) {
+        w.plan = { dryStart: addDays(today, slot), source: "rush" };
+        w.planState = "scheduled";
+        w.planIssue = null;
+        return { ok: true, slot };
+      }
+      let reason = `原承诺交付日 ${w.delivery} 前没有空闲工位；插单不得挤占任何已承诺订单，因此未改动现有排程。`;
+      const gf = [];
+      for (let d = e + DRY_DAYS; d <= Math.min(deadline, HORIZON - 1); d++) {
+        if (grid.gold[d].length >= GOLD_CAP) gf.push(`${md(addDays(today, d))}(${namesOf(grid.gold[d])})`);
+      }
+      if (gf.length) reason += ` 金粉工位已满：${gf.join("、")}。`;
+      const df = [];
+      for (let d = e; d <= Math.min(maxStart + 1, HORIZON - 2); d++) {
+        if (grid.dry[d].length >= DRY_CAP) df.push(`${md(addDays(today, d))}(${namesOf(grid.dry[d])})`);
+      }
+      if (df.length) reason += ` 阴干工位已满：${df.join("、")}。`;
+      if (deadline - DRY_DAYS > HORIZON - DRY_DAYS - 1) reason += " 承诺日落于七天窗口之外，窗口内也无空档可以提前。";
+      w.plan = null;
+      w.planState = "conflict";
+      w.planIssue = reason;
+      return { ok: false, reason };
+    }
+
+    // 手工前移/后移：校验工艺时间、容量与承诺，任何一项不满足都拒绝且不改数据
+    function adjustPlan(id, delta) {
+      const w = works.find(x => x.id === id);
+      const sv = w && w._sv;
+      if (!w || !sv || sv.kind !== "planned") return;
+      const target = sv.s + delta;
+      if (target < 0 || target > HORIZON - DRY_DAYS - 1) {
+        note("err", `《${w.theme}》已到七天排程窗口边界，无法继续${delta < 0 ? "前移" : "后移"}。`);
+        return;
+      }
+      const e = earliestDry(w);
+      if (target < e) {
+        note("err", `《${w.theme}》贴线尚未完成：最早 ${md(addDays(today, e))} 才能开始阴干，不能提前。`);
+        return;
+      }
+      const grid = committedGrid(works.filter(x => x.id !== w.id));
+      if (!canPlace(grid, target)) {
+        const blocks = [];
+        if (grid.dry[target].length >= DRY_CAP) blocks.push(`${md(addDays(today, target))} 阴干位已满（${namesOf(grid.dry[target])}）`);
+        if (grid.dry[target + 1].length >= DRY_CAP) blocks.push(`${md(addDays(today, target + 1))} 阴干位已满（${namesOf(grid.dry[target + 1])}）`);
+        if (grid.gold[target + DRY_DAYS].length >= GOLD_CAP) blocks.push(`${md(addDays(today, target + DRY_DAYS))} 金粉位已被 ${namesOf(grid.gold[target + DRY_DAYS])} 占用`);
+        note("err", `《${w.theme}》无法改到 ${md(addDays(today, target))} 起阴干：${blocks.join("；") || "目标日期容量不足"}。排程未改动。`);
+        return;
+      }
+      const goldDate = addDays(today, target + DRY_DAYS);
+      if (w.delivery >= today && goldDate > w.delivery) {
+        note("err", `《${w.theme}》调整后上金粉日为 ${md(goldDate)}，晚于原承诺交付日 ${w.delivery}，不能静默改期。排程未改动。`);
+        return;
+      }
+      w.plan = { dryStart: addDays(today, target), source: "manual" };
+      w.planState = "scheduled";
+      w.planIssue = null;
+      w.logs.push(`${new Date().toLocaleString()} 手工调整排程：阴干改为 ${w.plan.dryStart} 起，金粉 ${goldDate}`);
+      save();
+      note("ok", `《${w.theme}》已调整：${md(addDays(today, target))}–${md(addDays(today, target + 1))} 阴干，${md(goldDate)} 上金粉；其他作品排程未受影响。`);
+    }
+
+    // 冲突池中的作品重新尝试（插单严格规则；普通件随自动排程重新归位）
+    function retryWork(id) {
+      const w = works.find(x => x.id === id);
+      if (!w) return;
+      if (w.planState === "conflict") {
+        const res = attemptRush(w);
+        save();
+        if (res.ok) {
+          note("ok", `插单《${w.theme}》现已排入：${md(addDays(today, res.slot))}–${md(addDays(today, res.slot + 1))} 阴干，${md(addDays(today, res.slot + DRY_DAYS))} 上金粉；未挤占其他已承诺订单。`);
+        } else {
+          note("err", `插单《${w.theme}》仍无法排入。${w.planIssue}`);
+        }
+        return;
+      }
+      // 过期 / 容量冲突 / 排不下：清掉旧锁定后重新自动排
+      w.plan = null;
+      if (w.planState !== "unscheduled") w.planState = null;
+      save();
+      render();
+      const sv = w._sv;
+      if (sv.kind === "planned") {
+        note("ok", `《${w.theme}》已重新排入：${md(addDays(today, sv.s))}–${md(addDays(today, sv.s + 1))} 阴干，${md(addDays(today, sv.s + DRY_DAYS))} 上金粉。`);
+      } else {
+        note("err", `《${w.theme}》仍无法排入未来七天。${w.planIssue || ""}`);
+      }
+    }
+
+    function reautoAll() {
+      if (!confirm("重新自动排程将清除全部手工调整与插单锁定结果（作品台账数据不变）。插单仍会严格校验、排不进照样退回冲突池。是否继续？")) return;
+      for (const w of works) {
+        if (!isActive(w)) continue;
+        w.plan = null;
+        w.planState = null;
+        w.planIssue = null;
+      }
+      save();
+      // 插单先按优先级严格尝试，避免静默晚于承诺
+      const rushList = works.filter(w => w.rush && isActive(w)).sort(priorityCmp);
+      let failed = 0;
+      for (const w of rushList) {
+        if (!attemptRush(w).ok) failed++;
+      }
+      save();
+      render();
+      note("info", `已按“超期 → 缺陷 → 交付承诺”重新排程。${rushList.length ? `插单 ${rushList.length} 件、${failed} 件无法满足（见冲突说明）。` : ""}`);
+    }
+
+    // ============ 排程渲染 ============
+    function scheduleCard(w, lane, dayIdx) {
+      const sv = w._sv;
+      const planned = sv.kind === "planned";
+      const s = planned ? sv.s : 0;
+      const goldDate = planned ? addDays(today, s + DRY_DAYS) : today;
+      const overdue = w.delivery < today;
+      const late = planned && goldDate > w.delivery;
+      const cls = ["sched-card"];
+      if (w.rush) cls.push("rush");
+      if (overdue || late) cls.push("late");
+      const tags = [];
+      if (overdue) tags.push(`<span class="tag tag-red">超期</span>`);
+      if (late) tags.push(`<span class="tag tag-red">晚于承诺</span>`);
+      if (w.defect) tags.push(`<span class="tag tag-amber">缺陷</span>`);
+      if (w.rush) tags.push(`<span class="tag tag-violet">插单</span>`);
+      if (planned && sv.source === "manual") tags.push(`<span class="tag tag-amber">手调</span>`);
+      if (planned && sv.source === "rush") tags.push(`<span class="tag tag-violet">插单排入</span>`);
+      if (sv.kind === "fixed") tags.push(`<span class="tag tag-blue">今日在制</span>`);
+      if (lane === "dry") tags.push(`<span class="tag">阴干第${dayIdx === s ? 1 : 2}天</span>`);
+      if (lane === "gold") tags.push(`<span class="tag tag-blue">上金粉日</span>`);
+      const dates = planned
+        ? `<div class="meta">阴干 ${md(addDays(today, s))}–${md(addDays(today, s + 1))}<br>金粉 ${md(goldDate)}</div>`
+        : `<div class="meta">今日上金粉（在制）</div>`;
+      const thread = planned && w.status === "贴线中"
+        ? `<div class="meta">贴线约 ${md(addDays(today, earliestDry(w)))} 完工</div>` : "";
+      const adjust = planned && lane === "dry" && dayIdx === s
+        ? `<div class="actions">
+             <button class="secondary" onclick="adjustPlan('${w.id}',-1)" ${s === 0 ? "disabled" : ""}>前移一天</button>
+             <button class="secondary" onclick="adjustPlan('${w.id}',1)" ${s === HORIZON - DRY_DAYS - 1 ? "disabled" : ""}>后移一天</button>
+           </div>`
+        : "";
+      return `<article class="${cls.join(" ")}" onclick="showDetail('${w.id}')">
+        <b>${w.theme}</b>
+        <div class="meta">${w.base} · ${w.line}</div>
+        <div class="tags">${tags.join("")}</div>
+        ${dates}${thread}
+        <div class="meta">承诺 ${md(w.delivery)}</div>
+        ${adjust}
+      </article>`;
+    }
+
+    function renderAlerts() {
+      const rows = [];
+      for (const w of works) {
+        const sv = w._sv;
+        if (!sv) continue;
+        if (sv.kind === "conflict") {
+          rows.push(`<div class="alert alert-red">
+            <div><b>${w.rush ? "插单未满足" : "急件未满足"}：《${w.theme}》</b> <span class="tag tag-violet">插单</span></div>
+            <div>原承诺交付：<b class="red">${w.delivery}</b>（${md(w.delivery)}）</div>
+            <div>冲突原因：${w.planIssue || "无可用工位"}</div>
+            <div class="actions">
+              <button class="violet" onclick="retryWork('${w.id}')">腾出工位后重试</button>
+              <button class="secondary" onclick="showDetail('${w.id}')">作品详情</button>
+            </div>
+          </div>`);
+        } else if (sv.kind === "unscheduled") {
+          rows.push(`<div class="alert alert-warn">
+            <div><b>七天内排不下：《${w.theme}》</b>${w.defect ? '<span class="tag tag-amber">缺陷件</span>' : ""}${w.delivery < today ? '<span class="tag tag-red">已超期</span>' : ""}</div>
+            <div>原承诺交付：<b class="red">${w.delivery}</b>（${md(w.delivery)}）</div>
+            <div>原因：${w.planIssue}</div>
+            <div class="actions">
+              <button class="warn" onclick="retryWork('${w.id}')">重新尝试排入</button>
+              <button class="secondary" onclick="showDetail('${w.id}')">作品详情</button>
+            </div>
+          </div>`);
+        } else if (sv.kind === "stale") {
+          rows.push(`<div class="alert alert-warn">
+            <div><b>排程已过期：《${w.theme}》</b> <span class="tag tag-amber">未流转</span></div>
+            <div>原承诺交付：<b class="red">${w.delivery}</b>；原锁定阴干日 ${w.plan.dryStart} 已过，作品仍停留在「${w.status}」。系统未自动改期。</div>
+            <div class="actions">
+              <button class="warn" onclick="retryWork('${w.id}')">按今天重新排程</button>
+              <button class="secondary" onclick="showDetail('${w.id}')">作品详情</button>
+            </div>
+          </div>`);
+        } else if (sv.kind === "collision") {
+          rows.push(`<div class="alert alert-red">
+            <div><b>锁定计划冲突：《${w.theme}》</b></div>
+            <div>原计划 ${w.plan.dryStart} 起阴干，但该阴干/金粉位已被今日在制件占用，无法同时执行。任何一件都未被系统自动移动。</div>
+            <div class="actions">
+              <button class="warn" onclick="retryWork('${w.id}')">重新排程此件</button>
+              <button class="secondary" onclick="showDetail('${w.id}')">作品详情</button>
+            </div>
+          </div>`);
+        } else if (sv.kind === "outside") {
+          rows.push(`<div class="alert alert-warn">
+            <div><b>排程在七天窗口之外：《${w.theme}》</b></div>
+            <div>锁定计划为 ${w.plan.dryStart} 起阴干、${addDays(w.plan.dryStart, DRY_DAYS)} 上金粉（原承诺交付 ${w.delivery}）。到期前会自动进入窗口。</div>
+          </div>`);
+        }
+      }
+      document.querySelector("#schedAlerts").innerHTML = rows.join("");
+    }
+
+    function renderSchedule() {
+      const grid = buildSchedule();
+      renderAlerts();
+
+      const active = works.filter(isActive);
+      const plannedCount = active.filter(w => w._sv && (w._sv.kind === "planned" || w._sv.kind === "fixed")).length;
+      const overdueCount = active.filter(w => w.delivery < today).length;
+      const riskCount = active.filter(w => {
+        const sv = w._sv;
+        return sv && sv.kind === "planned" && addDays(today, sv.s + DRY_DAYS) > w.delivery;
+      }).length;
+      const conflictCount = active.filter(w => w._sv && ["conflict", "unscheduled", "stale", "collision"].includes(w._sv.kind)).length;
+      document.querySelector("#schedStats").innerHTML =
+        `七天内已排 <b>${plannedCount}</b> 件 · 已超期承诺 <b class="red">${overdueCount}</b> 件 · 排程晚于承诺 <b class="red">${riskCount}</b> 件 · 待处理冲突 <b class="${conflictCount ? "red" : ""}">${conflictCount}</b> 件`;
+
+      const byId = id => works.find(w => w.id === id);
+      const cols = [];
+      for (let d = 0; d < HORIZON; d++) {
+        const lab = dayLabel(d);
+        const dryItems = grid.dry[d];
+        const goldItems = grid.gold[d];
+        const dryCapCls = dryItems.length > DRY_CAP ? "over" : dryItems.length === DRY_CAP ? "full" : "";
+        const goldCapCls = goldItems.length > GOLD_CAP ? "over" : goldItems.length === GOLD_CAP ? "full" : "";
+        const drySlots = [0, 1].map(k => {
+          const w = dryItems[k] ? byId(dryItems[k]) : null;
+          return `<div class="slot ${w ? "used" : ""}">${w ? scheduleCard(w, "dry", d) : '<span class="empty">阴干空位</span>'}</div>`;
+        }).join("");
+        const dryExtra = dryItems.slice(DRY_CAP).map(id => `<div class="slot over">${scheduleCard(byId(id), "dry", d)}</div>`).join("");
+        const goldSlots = [0].map(k => {
+          const w = goldItems[k] ? byId(goldItems[k]) : null;
+          return `<div class="slot ${w ? "used" : ""}">${w ? scheduleCard(w, "gold", d) : '<span class="empty">金粉空位</span>'}</div>`;
+        }).join("");
+        const goldExtra = goldItems.slice(GOLD_CAP).map(id => `<div class="slot over">${scheduleCard(byId(id), "gold", d)}</div>`).join("");
+        cols.push(`<div class="day">
+          <h4>
+            ${d === 0 ? '<span class="today-tag">今天</span>' : ""}<b>${lab.text}</b><span class="meta">${lab.week}</span>
+            <span class="cap ${dryCapCls}">阴干 ${Math.min(dryItems.length, DRY_CAP)}/${DRY_CAP}${dryItems.length > DRY_CAP ? " 超配" : ""}</span>
+            <span class="cap ${goldCapCls}">金粉 ${goldItems.length}/${GOLD_CAP}${goldItems.length > GOLD_CAP ? " 超配" : ""}</span>
+          </h4>
+          <div class="lane lane-dry">
+            <h5>阴干位（每天 2 件，连放 2 天）</h5>
+            ${drySlots}${dryExtra}
+          </div>
+          <div class="lane lane-gold">
+            <h5>金粉位（每天 1 件）</h5>
+            ${goldSlots}${goldExtra}
+          </div>
+        </div>`);
+      }
+      document.querySelector("#schedGrid").innerHTML = cols.join("");
+
+      const box = document.querySelector("#schedMsg");
+      box.innerHTML = schedNote ? `<div class="msg ${schedNote.type === "err" ? "err" : schedNote.type === "ok" ? "ok" : "info"}">${schedNote.text}</div>` : "";
+    }
+
+    // ============ 既有功能 ============
     function updateStatus(id, status) {
       const work = works.find(w => w.id === id);
+      const oldRank = statusRank.get(work.status);
       work.status = status;
-      if (status === "待阴干") work.dryDate = new Date().toISOString().slice(0, 10);
+      if (status === "待阴干") work.dryDate = today;
       if (status === "上金粉") work.gold = "已上金粉";
       if (status === "待交付") work.progress = 100;
+      if (statusRank.get(status) < oldRank) {
+        // 工序回退：旧承诺排程作废，下次渲染按优先级重排（冲突/超期会明示，不平白改别人）
+        work.plan = null;
+        work.planState = null;
+        work.planIssue = null;
+      } else if (status === "待交付") {
+        work.planState = "done";
+      }
       work.logs.push(`${new Date().toLocaleString()} 更新为 ${status}`);
       save();
       render();
@@ -189,6 +763,18 @@
       render();
     }
 
+    function planDescription(w) {
+      if (w.status === "待交付" || w.planState === "done") return "已完成交付";
+      if (w.planState === "conflict") return `插单未排入；原承诺 ${w.delivery}；原因：${w.planIssue || "无可用工位"}`;
+      if (w.planState === "unscheduled") return `七天内排不下；原承诺 ${w.delivery}；原因：${w.planIssue || "容量不足"}`;
+      if (w.plan && w.plan.dryStart) {
+        const s = dayDiff(today, w.plan.dryStart);
+        if (s < 0) return `排程已过期未流转（原定阴干 ${w.plan.dryStart}），请重新排程`;
+        return `阴干 ${w.plan.dryStart} 起两天，金粉 ${addDays(w.plan.dryStart, DRY_DAYS)}（${SOURCE_LABEL[w.plan.source] || "排程"}）`;
+      }
+      return "待排产";
+    }
+
     function showDetail(id) {
       activeId = id;
       const w = works.find(item => item.id === id);
@@ -196,7 +782,10 @@
       document.querySelector("#detailContent").innerHTML = `
         胎体材质：${w.base}<br>线条粗细：${w.line}<br>贴线进度：${w.progress}%<br>
         阴干日期：${w.dryDate}<br>金粉状态：${w.gold}<br>缺陷位置：${w.defect || "无"}<br>
-        交付日期：${w.delivery}<br>当前状态：${w.status}<br>备注：${w.note || "无"}<br>
+        交付日期：${w.delivery}${w.delivery < today ? ' <span class="red">（已超期）</span>' : ""}<br>
+        当前状态：${w.status}<br>急件插单：${w.rush ? "是" : "否"}<br>
+        排程：${planDescription(w)}<br>
+        备注：${w.note || "无"}<br>
         流转记录：${w.logs.join(" / ")}
       `;
       document.querySelector("#defectInput").value = "";
@@ -219,8 +808,8 @@
         return `<section class="col">
           <h3><span>${status}</span><span>${cards.length}</span></h3>
           ${cards.length ? cards.map(w => `<article class="item ${w.defect ? "overdue" : ""}" onclick="showDetail('${w.id}')">
-            <b>${w.theme}</b>
-            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}</div>
+            <b>${w.theme}</b>${w.rush ? ' <span class="tag tag-violet">插单</span>' : ""}
+            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}<br><span class="meta">排程：${planDescription(w)}</span></div>
             <div class="actions" onclick="event.stopPropagation()">
               ${statuses.map(s => `<button class="${s === status ? "secondary" : ""}" onclick="updateStatus('${w.id}', '${s}')">${s}</button>`).join("")}
               <button class="warn" onclick="recordDefect('${w.id}')">记缺陷</button>
@@ -231,6 +820,7 @@
     }
 
     function render() {
+      renderSchedule();
       renderSummaries();
       renderBoard();
     }
@@ -238,7 +828,7 @@
     form.addEventListener("submit", event => {
       event.preventDefault();
       const data = Object.fromEntries(new FormData(form).entries());
-      works.unshift({
+      const w = {
         id: crypto.randomUUID(),
         base: data.base,
         theme: data.theme,
@@ -250,13 +840,54 @@
         delivery: data.delivery,
         status: data.status,
         note: data.note,
+        rush: false,
         logs: [`${new Date().toLocaleString()} 创建作品`]
-      });
+      };
+      works.unshift(w);
       form.reset();
       form.dryDate.value = today;
-      form.delivery.value = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+      form.delivery.value = addDays(today, 5);
       save();
       render();
+      const sv = w._sv;
+      if (sv.kind === "unscheduled") {
+        note("err", `《${w.theme}》未能排入未来七天。${w.planIssue}`);
+      } else if (sv.kind === "planned") {
+        const g = addDays(today, sv.s + DRY_DAYS);
+        if (g > w.delivery) {
+          note("err", `《${w.theme}》已尽量前排，但上金粉日 ${md(g)} 仍晚于承诺交付 ${w.delivery}，已在排程中标红，请处理。`);
+        } else {
+          note("ok", `《${w.theme}》已自动排入：${md(addDays(today, sv.s))}–${md(addDays(today, sv.s + 1))} 阴干，${md(g)} 上金粉，满足 ${w.delivery} 交付承诺。`);
+        }
+      }
+    });
+
+    rushForm.addEventListener("submit", event => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(rushForm).entries());
+      const w = {
+        id: crypto.randomUUID(),
+        base: data.base,
+        theme: data.theme,
+        line: data.line,
+        progress: Number(data.progress),
+        dryDate: today,
+        gold: "未处理",
+        defect: data.defect || "",
+        delivery: data.delivery,
+        status: Number(data.progress) >= 100 ? "待阴干" : "贴线中",
+        note: "急件插单",
+        rush: true,
+        logs: [`${new Date().toLocaleString()} 急件插单，承诺交付 ${data.delivery}`]
+      };
+      works.unshift(w);
+      const res = attemptRush(w);
+      save();
+      if (res.ok) {
+        note("ok", `插单《${w.theme}》已排入：${md(addDays(today, res.slot))}–${md(addDays(today, res.slot + 1))} 阴干，${md(addDays(today, res.slot + DRY_DAYS))} 上金粉。现有已承诺订单一件都未移动。`);
+      } else {
+        note("err", `插单《${w.theme}》未排入，现有排程未做任何改动。<br>原承诺交付：<b class="red">${w.delivery}</b>（${md(w.delivery)}）<br>冲突原因：${w.planIssue}`);
+      }
     });
 
     document.querySelector("#saveDefect").addEventListener("click", () => {
@@ -269,9 +900,10 @@
       statusFilter.value = "";
       render();
     });
+    document.querySelector("#reautoBtn").addEventListener("click", reautoAll);
     [statusFilter, themeFilter, sortMode].forEach(el => el.addEventListener("input", render));
     document.querySelector("#exportBtn").addEventListener("click", () => {
-      const blob = new Blob([JSON.stringify(works, null, 2)], { type: "application/json" });
+      const blob = new Blob([JSON.stringify(works.map(stripView), null, 2)], { type: "application/json" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = "lacquer-thread-works.json";
@@ -282,6 +914,9 @@
     window.updateStatus = updateStatus;
     window.recordDefect = recordDefect;
     window.showDetail = showDetail;
+    window.adjustPlan = adjustPlan;
+    window.retryWork = retryWork;
+
     save();
     render();
   </script>
