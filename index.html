@@ -51,6 +51,24 @@
     dialog::backdrop { background: rgba(0, 0, 0, 0.3); }
     .dialog-body { padding: 16px; display: grid; gap: 10px; }
     .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+    .sched-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .sched-head h2 { margin: 0; }
+    .sched-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .sched-grid { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 10px; overflow-x: auto; }
+    .daycol { background: #f9fbf9; border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 170px; }
+    .daycol.today { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal) inset; }
+    .daycol h3 { margin: 0 0 8px; font-size: 13px; display: flex; justify-content: space-between; }
+    .slot { margin-bottom: 8px; }
+    .slot h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; font-weight: normal; }
+    .chip { display: inline-block; background: #fff; border: 1px solid #d7e0dc; border-left: 3px solid var(--teal); border-radius: 5px; padding: 2px 6px; margin: 0 4px 4px 0; font-size: 12px; cursor: pointer; }
+    .chip.defect { border-left-color: var(--amber); }
+    .chip.late { border-left-color: var(--red); color: var(--red); }
+    .cap { font-size: 11px; color: var(--muted); }
+    .cap.full { color: var(--amber); }
+    .cap.over { color: var(--red); font-weight: bold; }
+    .flag { background: var(--red); color: #fff; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+    .note { background: #e7f2ec; border: 1px solid #bcd8c9; border-radius: 6px; padding: 8px 10px; font-size: 13px; margin-bottom: 10px; }
+    .conf-title { margin: 14px 0 8px; font-size: 14px; }
     @media (max-width: 980px) {
       header { display: block; padding: 18px; }
       main { padding: 16px; }
@@ -63,15 +81,29 @@
   <header>
     <div>
       <h1>小型漆线雕工坊管理</h1>
-      <div class="sub">贴线、阴干、上金粉、待交付的作品流转与缺陷追踪</div>
+      <div class="sub">贴线、阴干、上金粉、待交付的作品流转、缺陷追踪与七日排产</div>
     </div>
     <button id="exportBtn" class="secondary">导出 JSON</button>
   </header>
 
   <main>
+    <section class="panel" id="schedulePanel">
+      <div class="sched-head">
+        <h2>未来七天排程</h2>
+        <div class="sched-actions">
+          <span class="meta">规则：超期与缺陷件优先 · 阴干两天（每天≤2件）· 上金粉一天（每天≤1件）· 插单不影响已承诺订单</span>
+          <button id="replanBtn" class="violet">全部重排</button>
+        </div>
+      </div>
+      <div id="insertNote"></div>
+      <div id="schedGrid" class="sched-grid"></div>
+      <h3 class="conf-title">承诺与冲突</h3>
+      <div id="conflictList"></div>
+    </section>
+
     <section class="top">
       <form id="workForm" class="panel">
-        <h2>新增作品</h2>
+        <h2>新增作品 / 插单</h2>
         <div class="grid2">
           <label>胎体材质<input name="base" required placeholder="脱胎漆器"></label>
           <label>纹样主题<input name="theme" required placeholder="缠枝莲"></label>
@@ -91,6 +123,7 @@
         <label>缺陷位置<input name="defect" placeholder="右下花瓣断线"></label>
         <label>备注<textarea name="note" placeholder="客户偏好、修补记录"></textarea></label>
         <button type="submit">加入工坊</button>
+        <div class="meta">新单按插单处理：只占用剩余产能，不会推迟任何已承诺订单；若无法按承诺交付，会提示原承诺与冲突原因。</div>
       </form>
 
       <section class="panel">
@@ -134,17 +167,49 @@
     </div>
   </dialog>
 
+  <dialog id="insertDialog">
+    <div class="dialog-body">
+      <h2>插单冲突：无法按承诺交付</h2>
+      <div id="insertContent" class="meta"></div>
+      <div class="actions">
+        <button id="insertAnyway" class="danger">仍然加入（保留原承诺）</button>
+        <button id="insertCancel" class="secondary">取消插单</button>
+      </div>
+    </div>
+  </dialog>
+
   <script>
     const statuses = ["贴线中", "待阴干", "上金粉", "待交付"];
     const storageKey = "zfl42Works";
-    const today = new Date().toISOString().slice(0, 10);
+    const scheduleKey = "zfl42Schedule";
+    const DRY_CAP = 2;        // 每天最多两件阴干
+    const GOLD_CAP = 1;       // 每天最多一件上金粉
+    const DRY_DAYS = 2;       // 每件阴干两天
+    const GOLD_DAYS = 1;      // 每件上金粉一天
+    const THREAD_PER_DAY = 50; // 贴线每天约推进 50%
+    const HORIZON = 7;        // 排程视图覆盖未来七天
+
+    // ---- 日期工具（本地时区，YYYY-MM-DD 字符串可直接比较）----
+    function fmt(d) {
+      const p = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    }
+    function todayStr() { return fmt(new Date()); }
+    function addDays(s, n) { const d = new Date(s + "T00:00:00"); d.setDate(d.getDate() + n); return fmt(d); }
+    function diffDays(a, b) { return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000); }
+    function weekday(s) { return "周" + "日一二三四五六"[new Date(s + "T00:00:00").getDay()]; }
+
     const seed = [
-      { id: crypto.randomUUID(), base: "木胎香盒", theme: "海水江崖", line: "细线", progress: 70, dryDate: today, gold: "未处理", defect: "", delivery: "2026-06-26", status: "待阴干", note: "边线需保持低浮雕感", logs: ["创建作品"] },
-      { id: crypto.randomUUID(), base: "脱胎盘", theme: "折枝梅", line: "混合线", progress: 95, dryDate: "2026-06-20", gold: "试扫粉", defect: "左侧枝干翘线", delivery: "2026-06-23", status: "上金粉", note: "客户要求金粉偏暗", logs: ["创建作品", "记录翘线"] },
-      { id: crypto.randomUUID(), base: "竹胎笔筒", theme: "云雷纹", line: "中线", progress: 40, dryDate: "2026-06-24", gold: "未处理", defect: "", delivery: "2026-06-30", status: "贴线中", note: "", logs: ["创建作品"] }
+      { id: crypto.randomUUID(), base: "木胎香盒", theme: "海水江崖", line: "细线", progress: 70, dryDate: todayStr(), gold: "未处理", defect: "", delivery: addDays(todayStr(), 4), status: "待阴干", note: "边线需保持低浮雕感", logs: ["创建作品"] },
+      { id: crypto.randomUUID(), base: "脱胎盘", theme: "折枝梅", line: "混合线", progress: 95, dryDate: addDays(todayStr(), -1), gold: "试扫粉", defect: "左侧枝干翘线", delivery: addDays(todayStr(), 2), status: "上金粉", note: "客户要求金粉偏暗", logs: ["创建作品", "记录翘线"] },
+      { id: crypto.randomUUID(), base: "竹胎笔筒", theme: "云雷纹", line: "中线", progress: 40, dryDate: addDays(todayStr(), 3), gold: "未处理", defect: "", delivery: addDays(todayStr(), 6), status: "贴线中", note: "", logs: ["创建作品"] },
+      { id: crypto.randomUUID(), base: "脱胎漆瓶", theme: "缠枝莲", line: "粗线", progress: 85, dryDate: addDays(todayStr(), -1), gold: "未处理", defect: "", delivery: addDays(todayStr(), -1), status: "待阴干", note: "展会急件", logs: ["创建作品"] }
     ];
     let works = JSON.parse(localStorage.getItem(storageKey) || "null") || seed;
+    let schedule = JSON.parse(localStorage.getItem(scheduleKey) || "null") || { start: todayStr(), plans: {} };
     let activeId = null;
+    let pendingInsert = null;
+    let lastNote = "";
 
     const form = document.querySelector("#workForm");
     const board = document.querySelector("#board");
@@ -152,15 +217,208 @@
     const themeFilter = document.querySelector("#themeFilter");
     const sortMode = document.querySelector("#sortMode");
     const dialog = document.querySelector("#detailDialog");
+    const insertDialog = document.querySelector("#insertDialog");
 
-    form.dryDate.value = today;
-    form.delivery.value = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
     statusFilter.innerHTML = `<option value="">全部状态</option>` + statuses.map(s => `<option>${s}</option>`).join("");
 
     function save() {
       localStorage.setItem(storageKey, JSON.stringify(works));
     }
+    function saveSchedule() {
+      localStorage.setItem(scheduleKey, JSON.stringify(schedule));
+    }
 
+    // ---- 排程引擎 ----
+    // 按当前状态推算剩余工序：贴线（按进度）→ 阴干两天 → 上金粉一天
+    function stagesFor(w) {
+      const stages = [];
+      if (w.status === "待交付") return stages;
+      if (w.status === "贴线中") {
+        const days = Math.ceil(Math.max(0, 100 - Number(w.progress || 0)) / THREAD_PER_DAY);
+        if (days > 0) stages.push({ type: "thread", days });
+        stages.push({ type: "dry", days: DRY_DAYS });
+      } else if (w.status === "待阴干") {
+        stages.push({ type: "dry", days: DRY_DAYS });
+      }
+      if (w.gold !== "已上金粉") stages.push({ type: "gold", days: GOLD_DAYS });
+      return stages;
+    }
+
+    // 超期件优先，其次缺陷件，再按交付日期
+    function prioCompare(a, b) {
+      const start = todayStr();
+      const key = w => (w.delivery < start ? "0" : "1") + (w.defect ? "0" : "1") + w.delivery + w.id;
+      const ka = key(a), kb = key(b);
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    }
+
+    function occupy(occ, p, id) {
+      for (const d of p.dry || []) (occ.dry[d] = occ.dry[d] || []).push(id);
+      if (p.gold) (occ.gold[p.gold] = occ.gold[p.gold] || []).push(id);
+    }
+
+    function buildOccupancy(plans, excludeId) {
+      const occ = { dry: {}, gold: {} };
+      for (const [id, p] of Object.entries(plans)) {
+        if (id !== excludeId) occupy(occ, p, id);
+      }
+      return occ;
+    }
+
+    function fitsCaps(p, occ) {
+      for (const d of p.dry || []) if ((occ.dry[d] || []).length >= DRY_CAP) return false;
+      if (p.gold && (occ.gold[p.gold] || []).length >= GOLD_CAP) return false;
+      return true;
+    }
+
+    // 把一件作品放进剩余产能，返回其排程（会占用 occ）
+    function placeWork(w, occ, start) {
+      const plan = { thread: [], dry: null, gold: null, done: start };
+      let cursor = start;
+      for (const st of stagesFor(w)) {
+        if (st.type === "thread") {
+          for (let i = 0; i < st.days; i++) { plan.thread.push(cursor); cursor = addDays(cursor, 1); }
+        } else if (st.type === "dry") {
+          let d = w.dryDate && w.dryDate > cursor ? w.dryDate : cursor;
+          while ((occ.dry[d] || []).length >= DRY_CAP || (occ.dry[addDays(d, 1)] || []).length >= DRY_CAP) d = addDays(d, 1);
+          plan.dry = [d, addDays(d, 1)];
+          cursor = addDays(d, 2);
+        } else if (st.type === "gold") {
+          let d = cursor;
+          while ((occ.gold[d] || []).length >= GOLD_CAP) d = addDays(d, 1);
+          plan.gold = d;
+          cursor = addDays(d, 1);
+        }
+      }
+      plan.done = cursor === start ? start : addDays(cursor, -1);
+      occupy(occ, plan, w.id);
+      return plan;
+    }
+
+    // 已保存的排程在作品状态/工序变化或跨天后失效，需要重排
+    function planValid(w, p, start) {
+      if (!p) return false;
+      const need = stagesFor(w);
+      const needThread = (need.find(s => s.type === "thread") || { days: 0 }).days;
+      const needDry = need.some(s => s.type === "dry");
+      const needGold = need.some(s => s.type === "gold");
+      if ((p.thread || []).length !== needThread) return false;
+      if (needDry !== !!(p.dry && p.dry.length === DRY_DAYS)) return false;
+      if (needGold !== !!p.gold) return false;
+      const dates = [...(p.thread || []), ...(p.dry || []), ...(p.gold ? [p.gold] : [])];
+      if (dates.some(d => d < start)) return false;
+      for (let i = 1; i < (p.thread || []).length; i++) if (addDays(p.thread[i - 1], 1) !== p.thread[i]) return false;
+      if (p.dry && addDays(p.dry[0], 1) !== p.dry[1]) return false;
+      const lastThread = (p.thread || [])[p.thread.length - 1];
+      if (p.dry && lastThread && p.dry[0] <= lastThread) return false;
+      if (p.gold) {
+        const before = (p.dry && p.dry[1]) || lastThread;
+        if (before && p.gold <= before) return false;
+      }
+      return true;
+    }
+
+    // 保留仍有效的已排结果，只为新增/失效的作品在剩余产能中排程
+    function ensureSchedule() {
+      const start = todayStr();
+      const occ = { dry: {}, gold: {} };
+      const plans = {};
+      const rest = [];
+      for (const w of works.filter(item => item.status !== "待交付")) {
+        const p = schedule.plans[w.id];
+        if (p && planValid(w, p, start) && fitsCaps(p, occ)) {
+          plans[w.id] = p;
+          occupy(occ, p, w.id);
+        } else {
+          rest.push(w);
+        }
+      }
+      rest.sort(prioCompare);
+      for (const w of rest) plans[w.id] = placeWork(w, occ, start);
+      schedule = { start, plans };
+      saveSchedule();
+    }
+
+    // 插单模拟：现有排程全部锁定，新单只占剩余产能
+    function simulateInsert(w) {
+      const start = todayStr();
+      const occ = buildOccupancy(schedule.plans, null);
+      const plan = placeWork(w, occ, start);
+      const late = plan.done > w.delivery;
+      return { plan, late, reason: late ? conflictReason(w, plan, buildOccupancy(schedule.plans, null)) : null };
+    }
+
+    // 冲突原因：与零占用下的理想排程对比，找出被产能卡住的天与占用者
+    function conflictReason(w, plan, occOthers) {
+      const start = todayStr();
+      const ideal = placeWork(w, { dry: {}, gold: {} }, start);
+      const parts = [];
+      const names = ids => ids.map(id => { const x = works.find(item => item.id === id); return x ? `「${x.theme}」` : "另一件作品"; }).join("、");
+      if (w.delivery < start) parts.push(`交付承诺日 ${w.delivery} 已过`);
+      if (plan.dry && ideal.dry && plan.dry[0] > ideal.dry[0]) {
+        const days = [];
+        for (let d = ideal.dry[0]; d <= plan.dry[0]; d = addDays(d, 1)) {
+          const u = occOthers.dry[d] || [];
+          if (u.length >= DRY_CAP) days.push(`${d.slice(5)} ${names(u)}`);
+        }
+        if (days.length) parts.push(`阴干每天限 ${DRY_CAP} 件，${days.join("；")} 已排满`);
+      }
+      if (plan.gold && ideal.gold && plan.gold > ideal.gold) {
+        const days = [];
+        for (let d = ideal.gold; d < plan.gold; d = addDays(d, 1)) {
+          const u = occOthers.gold[d] || [];
+          if (u.length >= GOLD_CAP) days.push(`${d.slice(5)} ${names(u)}`);
+        }
+        if (days.length) parts.push(`上金粉每天限 ${GOLD_CAP} 件，${days.join("；")} 已占用`);
+      }
+      if (!parts.length) parts.push("贴线、两天阴干、一天上金粉的工序时长本身已超出剩余交期");
+      return parts.join("；");
+    }
+
+    function workLate(w) {
+      if (w.status === "待交付") return null;
+      const p = schedule.plans[w.id];
+      if (!p || p.done <= w.delivery) return null;
+      return { days: diffDays(w.delivery, p.done), done: p.done, overdue: w.delivery < todayStr() };
+    }
+
+    // 插单入口：无法满足承诺时不直接加入，交给负责人确认，绝不静默改期
+    function addWorkWithCheck(w, force = false) {
+      if (w.status === "待交付") {
+        commitWork(w);
+        return { added: true, late: false, sim: null };
+      }
+      const sim = simulateInsert(w);
+      if (sim.late && !force) return { added: false, late: true, sim };
+      commitWork(w);
+      return { added: true, late: sim.late, sim };
+    }
+
+    function commitWork(w) {
+      works.unshift(w);
+      ensureSchedule();
+      save();
+      render();
+    }
+
+    function replanAll() {
+      if (!confirm("将按「超期 → 缺陷 → 交付先后」重排全部未交付作品，已排日期可能变化。继续？")) return;
+      schedule = { start: todayStr(), plans: {} };
+      ensureSchedule();
+      render();
+    }
+
+    function planText(p) {
+      if (!p) return "—";
+      const bits = [];
+      if (p.thread && p.thread.length) bits.push(`贴线 ${p.thread[0].slice(5)}~${p.thread[p.thread.length - 1].slice(5)}`);
+      if (p.dry) bits.push(`阴干 ${p.dry[0].slice(5)}~${p.dry[1].slice(5)}`);
+      if (p.gold) bits.push(`金粉 ${p.gold.slice(5)}`);
+      bits.push(`可完成 ${p.done.slice(5)}`);
+      return bits.join(" · ");
+    }
+
+    // ---- 原有功能 ----
     function filtered() {
       return works
         .filter(w => !statusFilter.value || w.status === statusFilter.value)
@@ -171,10 +429,11 @@
     function updateStatus(id, status) {
       const work = works.find(w => w.id === id);
       work.status = status;
-      if (status === "待阴干") work.dryDate = new Date().toISOString().slice(0, 10);
+      if (status === "待阴干") work.dryDate = todayStr();
       if (status === "上金粉") work.gold = "已上金粉";
       if (status === "待交付") work.progress = 100;
       work.logs.push(`${new Date().toLocaleString()} 更新为 ${status}`);
+      ensureSchedule();
       save();
       render();
     }
@@ -185,6 +444,7 @@
       if (!value) return;
       work.defect = work.defect ? `${work.defect}; ${value}` : value;
       work.logs.push(`${new Date().toLocaleString()} 缺陷：${value}`);
+      ensureSchedule();
       save();
       render();
     }
@@ -196,7 +456,8 @@
       document.querySelector("#detailContent").innerHTML = `
         胎体材质：${w.base}<br>线条粗细：${w.line}<br>贴线进度：${w.progress}%<br>
         阴干日期：${w.dryDate}<br>金粉状态：${w.gold}<br>缺陷位置：${w.defect || "无"}<br>
-        交付日期：${w.delivery}<br>当前状态：${w.status}<br>备注：${w.note || "无"}<br>
+        交付日期：${w.delivery}<br>当前状态：${w.status}<br>排程：${planText(schedule.plans[w.id])}<br>
+        备注：${w.note || "无"}<br>
         流转记录：${w.logs.join(" / ")}
       `;
       document.querySelector("#defectInput").value = "";
@@ -204,6 +465,7 @@
     }
 
     function renderSummaries() {
+      const today = todayStr();
       const todayDry = works.filter(w => w.dryDate <= today && w.status === "待阴干");
       const defects = works.filter(w => w.defect);
       const delivery = [...works].sort((a, b) => a.delivery.localeCompare(b.delivery)).slice(0, 4);
@@ -218,27 +480,87 @@
         const cards = list.filter(w => w.status === status);
         return `<section class="col">
           <h3><span>${status}</span><span>${cards.length}</span></h3>
-          ${cards.length ? cards.map(w => `<article class="item ${w.defect ? "overdue" : ""}" onclick="showDetail('${w.id}')">
-            <b>${w.theme}</b>
-            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}</div>
+          ${cards.length ? cards.map(w => {
+            const late = workLate(w);
+            return `<article class="item ${w.defect || late ? "overdue" : ""}" onclick="showDetail('${w.id}')">
+            <b>${w.theme}</b> ${late ? `<span class="flag">超承诺 ${late.days} 天</span>` : ""}
+            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>排程：${planText(schedule.plans[w.id])}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}</div>
             <div class="actions" onclick="event.stopPropagation()">
               ${statuses.map(s => `<button class="${s === status ? "secondary" : ""}" onclick="updateStatus('${w.id}', '${s}')">${s}</button>`).join("")}
               <button class="warn" onclick="recordDefect('${w.id}')">记缺陷</button>
             </div>
-          </article>`).join("") : `<div class="empty">暂无作品</div>`}
+          </article>`;
+          }).join("") : `<div class="empty">暂无作品</div>`}
         </section>`;
       }).join("");
+    }
+
+    function chipHtml(w) {
+      const late = workLate(w);
+      const cls = late ? "chip late" : w.defect ? "chip defect" : "chip";
+      return `<span class="${cls}" title="${w.base}${w.defect ? " · 缺陷：" + w.defect : ""}" onclick="showDetail('${w.id}')">${w.theme}${w.defect ? " ⚠" : ""}</span>`;
+    }
+
+    function renderSchedule() {
+      const start = todayStr();
+      const days = Array.from({ length: HORIZON }, (_, i) => addDays(start, i));
+      const byDay = {};
+      for (const d of days) byDay[d] = { thread: [], dry: [], gold: [] };
+      for (const w of works) {
+        const p = schedule.plans[w.id];
+        if (!p) continue;
+        for (const d of p.thread || []) if (byDay[d]) byDay[d].thread.push(w);
+        for (const d of p.dry || []) if (byDay[d]) byDay[d].dry.push(w);
+        if (p.gold && byDay[p.gold]) byDay[p.gold].gold.push(w);
+      }
+      const slot = (label, list, cap) => {
+        const sorted = [...list].sort(prioCompare);
+        const capHtml = cap ? `<span class="cap ${list.length > cap ? "over" : list.length === cap ? "full" : ""}">${list.length}/${cap}</span>` : "";
+        return `<div class="slot"><h4><span>${label}</span>${capHtml}</h4>${sorted.length ? sorted.map(chipHtml).join("") : `<span class="meta">—</span>`}</div>`;
+      };
+      document.querySelector("#schedGrid").innerHTML = days.map(d => {
+        const b = byDay[d];
+        return `<section class="daycol ${d === start ? "today" : ""}">
+          <h3><span>${d.slice(5)} ${weekday(d)}</span><span>${d === start ? "今天" : ""}</span></h3>
+          ${slot("贴线", b.thread, 0)}
+          ${slot("阴干", b.dry, DRY_CAP)}
+          ${slot("上金粉", b.gold, GOLD_CAP)}
+        </section>`;
+      }).join("");
+
+      const lateList = works
+        .filter(w => w.status !== "待交付")
+        .map(w => ({ w, late: workLate(w) }))
+        .filter(x => x.late)
+        .sort((a, b) => b.late.days - a.late.days);
+      document.querySelector("#conflictList").innerHTML = lateList.length
+        ? `<div class="meta" style="margin-bottom:8px">以下作品无法按承诺交付。系统保留原承诺日期，不会自动改期；可调整产能或与客户协商后重新排程。</div>` +
+          lateList.map(({ w, late }) => {
+            const p = schedule.plans[w.id];
+            const reason = conflictReason(w, p, buildOccupancy(schedule.plans, w.id));
+            return `<div class="item overdue" onclick="showDetail('${w.id}')"><b>${w.theme}</b> · ${w.base}
+              <div class="meta">原承诺 <b>${w.delivery}</b>（${weekday(w.delivery)}）交付 → 排程最早 <b>${late.done}</b> 完成，${late.overdue ? "交付日已过" : `晚 ${late.days} 天`}<br>冲突原因：${reason}</div></div>`;
+          }).join("")
+        : `<div class="empty">全部承诺均可按期完成。</div>`;
+      document.querySelector("#insertNote").innerHTML = lastNote ? `<div class="note">${lastNote}</div>` : "";
     }
 
     function render() {
       renderSummaries();
       renderBoard();
+      renderSchedule();
+    }
+
+    function resetForm() {
+      form.reset();
+      form.dryDate.value = todayStr();
+      form.delivery.value = addDays(todayStr(), 5);
     }
 
     form.addEventListener("submit", event => {
       event.preventDefault();
       const data = Object.fromEntries(new FormData(form).entries());
-      works.unshift({
+      const candidate = {
         id: crypto.randomUUID(),
         base: data.base,
         theme: data.theme,
@@ -250,14 +572,43 @@
         delivery: data.delivery,
         status: data.status,
         note: data.note,
-        logs: [`${new Date().toLocaleString()} 创建作品`]
-      });
-      form.reset();
-      form.dryDate.value = today;
-      form.delivery.value = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
-      save();
+        logs: [`${new Date().toLocaleString()} 创建作品（插单）`]
+      };
+      const res = addWorkWithCheck(candidate);
+      if (res.added) {
+        lastNote = res.sim
+          ? res.late
+            ? `《${candidate.theme}》已加入，保留原承诺 ${candidate.delivery}，冲突详见下方「承诺与冲突」。`
+            : `《${candidate.theme}》已排入，预计 ${res.sim.plan.done} 完成，满足 ${candidate.delivery} 承诺。`
+          : `《${candidate.theme}》已加入（待交付，无需排程）。`;
+        resetForm();
+        render();
+      } else {
+        pendingInsert = { candidate, sim: res.sim };
+        document.querySelector("#insertContent").innerHTML =
+          `《${candidate.theme}》原承诺 <b>${candidate.delivery}</b>（${weekday(candidate.delivery)}）交付，` +
+          `当前产能下最早 <b>${res.sim.plan.done}</b>（${weekday(res.sim.plan.done)}）完成，晚 ${diffDays(candidate.delivery, res.sim.plan.done)} 天。<br>` +
+          `冲突原因：${res.sim.reason}<br>` +
+          `现有已承诺订单的排程不受影响，交付日期不会被自动修改。`;
+        insertDialog.showModal();
+      }
+    });
+
+    document.querySelector("#insertAnyway").addEventListener("click", () => {
+      if (!pendingInsert) return;
+      const { candidate } = pendingInsert;
+      addWorkWithCheck(candidate, true);
+      lastNote = `《${candidate.theme}》已加入并保留原承诺 ${candidate.delivery}，冲突详见下方「承诺与冲突」。`;
+      pendingInsert = null;
+      insertDialog.close();
+      resetForm();
       render();
     });
+    document.querySelector("#insertCancel").addEventListener("click", () => {
+      pendingInsert = null;
+      insertDialog.close();
+    });
+    document.querySelector("#replanBtn").addEventListener("click", replanAll);
 
     document.querySelector("#saveDefect").addEventListener("click", () => {
       recordDefect(activeId, document.querySelector("#defectInput").value.trim());
@@ -282,6 +633,8 @@
     window.updateStatus = updateStatus;
     window.recordDefect = recordDefect;
     window.showDetail = showDetail;
+    resetForm();
+    ensureSchedule();
     save();
     render();
   </script>
